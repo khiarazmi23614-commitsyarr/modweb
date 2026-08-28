@@ -4,7 +4,6 @@ import com.cinemamod.mcef.MCEF;
 import com.cinemamod.mcef.MCEFBrowser;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
@@ -16,20 +15,17 @@ import net.minecraft.client.render.VertexFormats;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-
 public final class BrowserScreen extends Screen {
     private final ModWebConfig config;
     private MCEFBrowser browser;
     private TextFieldWidget address;
     private boolean maximized;
+    private boolean minimized;
     private boolean dragging;
     private int dragX, dragY;
     private int oldX, oldY, oldW, oldH;
 
     private static final int BAR = 58;
-    private static final int RADIUS = 8;
 
     public BrowserScreen(Text title, ModWebConfig config) {
         super(title);
@@ -39,22 +35,27 @@ public final class BrowserScreen extends Screen {
     @Override
     protected void init() {
         super.init();
-        int w = Math.min(config.width, this.width - 20);
-        int h = Math.min(config.height, this.height - 20);
-        if (config.x + w > this.width) config.x = Math.max(0, this.width - w);
-        if (config.y + h > this.height) config.y = Math.max(0, this.height - h);
+        config.width = Math.max(400, Math.min(config.width, width));
+        config.height = Math.max(BAR + 100, Math.min(config.height, height));
+        config.x = Math.max(0, Math.min(config.x, width - config.width));
+        config.y = Math.max(0, Math.min(config.y, height - config.height));
 
         if (browser == null) {
             browser = MCEF.createBrowser("https://www.google.com", false);
             browser.setFocus(true);
         }
         resizeBrowser();
+        rebuildAddress();
+    }
 
-        address = new TextFieldWidget(textRenderer, config.x + 105, config.y + 10, Math.max(180, w - 190), 30,
+    private void rebuildAddress() {
+        clearChildren();
+        address = new TextFieldWidget(textRenderer, config.x + 105, config.y + 10,
+                Math.max(180, config.width - 190), 30,
                 Text.literal("Telusuri Google atau ketik URL"));
         address.setMaxLength(2048);
         address.setPlaceholder(Text.literal("Telusuri Google atau ketik URL"));
-        address.setChangedListener(value -> { });
+        address.setVisible(!minimized);
         addDrawableChild(address);
     }
 
@@ -73,7 +74,12 @@ public final class BrowserScreen extends Screen {
     @Override
     public void resize(MinecraftClient client, int width, int height) {
         super.resize(client, width, height);
-        init(client, width, height);
+        config.width = Math.min(config.width, width);
+        config.height = Math.min(config.height, height);
+        config.x = Math.max(0, Math.min(config.x, width - config.width));
+        config.y = Math.max(0, Math.min(config.y, height - config.height));
+        resizeBrowser();
+        rebuildAddress();
     }
 
     @Override
@@ -81,22 +87,20 @@ public final class BrowserScreen extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        // Keep the world visible and draw a simple crosshair behind the browser.
         drawCrosshair(ctx);
-
         int x = config.x, y = config.y, w = config.width, h = config.height;
         ctx.fill(x, y, x + w, y + BAR, 0xFF202124);
-        ctx.fill(x, y + BAR, x + w, y + h, 0xFF101114);
+        if (!minimized) {
+            ctx.fill(x, y + BAR, x + w, y + h, 0xFF101114);
+            drawBrowserTexture(ctx);
+        }
 
         ctx.drawText(textRenderer, "◉  Google Chrome", x + 12, y + 21, 0xFFE8EAED, false);
         ctx.drawText(textRenderer, "—", x + w - 72, y + 20, 0xFFBDC1C6, false);
         ctx.drawText(textRenderer, maximized ? "❐" : "□", x + w - 48, y + 20, 0xFFBDC1C6, false);
         ctx.drawText(textRenderer, "×", x + w - 25, y + 20, 0xFFE8EAED, false);
-
         ctx.fill(x + 100, y + 9, x + w - 82, y + 41, 0xFF303134);
-        ctx.drawText(textRenderer, "🎤   ◉", x + w - 72, y + 20, 0xFFBDC1C6, false);
-
-        drawBrowserTexture(ctx);
+        ctx.drawText(textRenderer, "🎤  ◉", x + w - 72, y + 20, 0xFFBDC1C6, false);
         super.render(ctx, mouseX, mouseY, delta);
     }
 
@@ -109,8 +113,8 @@ public final class BrowserScreen extends Screen {
         BufferBuilder b = tess.getBuffer();
         b.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_TEXTURE_COLOR);
         b.vertex(browserX(), browserY() + browserH(), 0).texture(0, 1).color(255,255,255,255).next();
-        b.vertex(browserX() + browserW(), browserY() + browserH(), 0).texture(1, 1).color(255,255,255,255).next();
-        b.vertex(browserX() + browserW(), browserY(), 0).texture(1, 0).color(255,255,255,255).next();
+        b.vertex(browserX()+browserW(), browserY()+browserH(), 0).texture(1, 1).color(255,255,255,255).next();
+        b.vertex(browserX()+browserW(), browserY(), 0).texture(1, 0).color(255,255,255,255).next();
         b.vertex(browserX(), browserY(), 0).texture(0, 0).color(255,255,255,255).next();
         tess.draw();
         RenderSystem.setShaderTexture(0, 0);
@@ -129,10 +133,10 @@ public final class BrowserScreen extends Screen {
         if (mouseY >= y && mouseY < y + BAR) {
             if (mouseX >= x + w - 32) { close(); return true; }
             if (mouseX >= x + w - 58) { toggleMaximize(); return true; }
-            if (mouseX >= x + w - 85) { config.height = 0; return true; }
-            if (mouseX < x + 100) { dragging = true; dragX = (int) mouseX - x; dragY = (int) mouseY - y; return true; }
+            if (mouseX >= x + w - 85) { minimized = !minimized; rebuildAddress(); return true; }
+            if (mouseX < x + 100) { dragging = true; dragX = (int)mouseX-x; dragY=(int)mouseY-y; return true; }
         }
-        if (mouseY >= browserY() && mouseX >= browserX() && mouseX <= browserX()+browserW()) {
+        if (!minimized && mouseY >= browserY() && mouseX >= browserX() && mouseX <= browserX()+browserW()) {
             double scale = client.getWindow().getScaleFactor();
             browser.sendMousePress((int)((mouseX-browserX())*scale), (int)((mouseY-browserY())*scale), button);
             browser.setFocus(true);
@@ -144,7 +148,7 @@ public final class BrowserScreen extends Screen {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         dragging = false;
-        if (browser != null) {
+        if (browser != null && !minimized) {
             double scale = client.getWindow().getScaleFactor();
             browser.sendMouseRelease((int)((mouseX-browserX())*scale), (int)((mouseY-browserY())*scale), button);
         }
@@ -153,12 +157,12 @@ public final class BrowserScreen extends Screen {
 
     @Override
     public void mouseMoved(double mouseX, double mouseY) {
-        if (dragging) {
+        if (dragging && !maximized) {
             config.x = Math.max(0, Math.min(width-config.width, (int)mouseX-dragX));
             config.y = Math.max(0, Math.min(height-config.height, (int)mouseY-dragY));
-            if (address != null) { address.setX(config.x + 105); address.setY(config.y + 10); }
+            rebuildAddress();
         }
-        if (browser != null && mouseY >= browserY()) {
+        if (browser != null && !minimized && mouseY >= browserY()) {
             double scale = client.getWindow().getScaleFactor();
             browser.sendMouseMove((int)((mouseX-browserX())*scale), (int)((mouseY-browserY())*scale));
         }
@@ -167,7 +171,7 @@ public final class BrowserScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
-        if (browser != null && mouseY >= browserY()) {
+        if (browser != null && !minimized && mouseY >= browserY()) {
             double scale = client.getWindow().getScaleFactor();
             browser.sendMouseWheel((int)((mouseX-browserX())*scale), (int)((mouseY-browserY())*scale), delta, 0);
             return true;
@@ -182,7 +186,7 @@ public final class BrowserScreen extends Screen {
             navigate(address.getText());
             return true;
         }
-        if (browser != null) {
+        if (browser != null && !minimized) {
             browser.sendKeyPress(keyCode, scanCode, modifiers);
             browser.setFocus(true);
         }
@@ -191,14 +195,14 @@ public final class BrowserScreen extends Screen {
 
     @Override
     public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
-        if (browser != null) browser.sendKeyRelease(keyCode, scanCode, modifiers);
+        if (browser != null && !minimized) browser.sendKeyRelease(keyCode, scanCode, modifiers);
         return super.keyReleased(keyCode, scanCode, modifiers);
     }
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
         if (address != null && address.isFocused()) return super.charTyped(codePoint, modifiers);
-        if (browser != null) browser.sendKeyTyped(codePoint, modifiers);
+        if (browser != null && !minimized) browser.sendKeyTyped(codePoint, modifiers);
         return super.charTyped(codePoint, modifiers);
     }
 
@@ -218,14 +222,12 @@ public final class BrowserScreen extends Screen {
     private void toggleMaximize() {
         if (!maximized) {
             oldX=config.x; oldY=config.y; oldW=config.width; oldH=config.height;
-            config.x=0; config.y=0; config.width=width; config.height=height;
-            maximized=true;
+            config.x=0; config.y=0; config.width=width; config.height=height; maximized=true;
         } else {
-            config.x=oldX; config.y=oldY; config.width=oldW; config.height=oldH;
-            maximized=false;
+            config.x=oldX; config.y=oldY; config.width=Math.min(oldW,width); config.height=Math.min(oldH,height); maximized=false;
         }
-        if (address != null) { address.setX(config.x+105); address.setY(config.y+10); address.setWidth(Math.max(180, config.width-190)); }
         resizeBrowser();
+        rebuildAddress();
     }
 
     @Override
