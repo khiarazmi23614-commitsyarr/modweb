@@ -1,0 +1,3 @@
+pluginManagement { repositories { maven { name = 'Fabric'; url = 'https://maven.fabricmc.net/' }; gradlePluginPortal(); mavenCentral() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.PREFER_PROJECT) }
+rootProject.name = 'modweb'
